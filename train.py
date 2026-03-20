@@ -41,10 +41,11 @@ def mean_cross_entropy(
     loader: DataLoader,
     device: torch.device,
     vocab_size: int,
+    max_batches: int | None = None,
 ) -> float:
     model.eval()
     total, tokens = 0.0, 0
-    for x, y in loader:
+    for batch_idx, (x, y) in enumerate(loader):
         x = x.to(device)
         y = y.to(device)
         logits = model(x)
@@ -55,6 +56,8 @@ def mean_cross_entropy(
         )
         total += loss.item()
         tokens += y.numel()
+        if max_batches is not None and batch_idx + 1 >= max_batches:
+            break
     model.train()
     return total / max(tokens, 1)
 
@@ -133,7 +136,10 @@ def main() -> None:
         pin_memory=device.type == "cuda",
     )
 
-    steps_per_epoch = (len(train_loader) + cfg.grad_accum_steps - 1) // cfg.grad_accum_steps
+    steps_per_epoch_raw = (len(train_loader) + cfg.grad_accum_steps - 1) // cfg.grad_accum_steps
+    steps_per_epoch = steps_per_epoch_raw
+    if cfg.max_steps_per_epoch is not None:
+        steps_per_epoch = min(steps_per_epoch_raw, cfg.max_steps_per_epoch)
     total_steps = max(1, cfg.epochs * steps_per_epoch)
 
     model = PreTrainingModel(
@@ -169,6 +175,7 @@ def main() -> None:
         optimizer.zero_grad(set_to_none=True)
         accum = 0
         pbar = tqdm(train_loader, desc=f"epoch {epoch+1}/{cfg.epochs}")
+        step_in_epoch = 0
 
         for x, y in pbar:
             x = x.to(device)
@@ -198,17 +205,18 @@ def main() -> None:
                     pbar.set_postfix(loss=f"{avg:.4f}", lr=f"{scheduler.get_last_lr()[0]:.2e}")
 
                 if global_step % cfg.eval_every == 0:
-                    vloss = mean_cross_entropy(model, val_loader, device, vocab_size)
+                    # Only compute on a subset to avoid long "stalls".
+                    vloss = mean_cross_entropy(
+                        model,
+                        val_loader,
+                        device,
+                        vocab_size,
+                        max_batches=cfg.val_max_batches,
+                    )
                     val_log_steps.append(global_step)
                     val_log_losses.append(vloss)
                     pbar.write(f"[step {global_step}] val loss = {vloss:.4f}")
-                    plot_learning_curve(
-                        train_log_steps,
-                        train_log_losses,
-                        val_log_steps,
-                        val_log_losses,
-                        os.path.join(os.path.dirname(__file__), cfg.learning_curve_path),
-                    )
+                    # Plotting every time is slow; plot once after training.
 
                 if global_step % cfg.checkpoint_every == 0:
                     ck_path = os.path.join(out_dir, f"checkpoint_step_{global_step}.pt")
@@ -229,6 +237,10 @@ def main() -> None:
                         epoch=epoch,
                         global_step=global_step,
                     )
+
+                step_in_epoch += 1
+                if step_in_epoch >= steps_per_epoch:
+                    break
 
         # end of epoch: flush running average if any
         if accum > 0:
