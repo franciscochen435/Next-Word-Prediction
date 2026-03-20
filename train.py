@@ -91,7 +91,10 @@ def build_scheduler(optimizer: AdamW, warmup_steps: int, total_steps: int) -> Se
         end_factor=1.0,
         total_iters=warmup_steps,
     )
-    cosine = CosineAnnealingLR(optimizer, T_max=cosine_steps, eta_min=0.0)
+    # Keep a small learning-rate floor so training doesn't completely stall.
+    base_lr = float(optimizer.defaults.get("lr", 0.0))
+    eta_min = base_lr * 0.1
+    cosine = CosineAnnealingLR(optimizer, T_max=cosine_steps, eta_min=eta_min)
     return SequentialLR(optimizer, [warmup, cosine], milestones=[warmup_steps])
 
 
