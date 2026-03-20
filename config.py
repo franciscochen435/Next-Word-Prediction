@@ -1,9 +1,9 @@
 vocab_size = 32000  # Number of unique tokens in the vocabulary (overridden by trained tokenizer if different)
 max_seq_len = 128  # Maximum sequence length
-d_model = 128  # Transformer hidden size / embedding dimension
+d_model = 256  # Transformer hidden size / embedding dimension
 n_heads = 4  # Size of attention heads in multi-head self-attention
-n_layers = 6  # Size of Transformer blocks
-d_ff = 512  # Hidden dimension of the FFN
+n_layers = 8  # Size of Transformer blocks
+d_ff = 1024  # Hidden dimension of the FFN
 dropout = 0.1  # Dropout probability applied during training
 batch_size = 8  # Training batch size
 lr = 1e-4  # Learning rate for the optimizer.
@@ -26,4 +26,4 @@ grad_clip = 1.0
 num_workers = 0  # dataloader workers (0 is safest on macOS)
 # If set, validation loss will be computed on only the first N batches.
 # This prevents training from "hanging" during full validation sweeps.
-val_max_batches = 50
+val_max_batches = 200
