@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 from tokenizers import Tokenizer
 
-from config import vocab_size, max_seq_len, d_model, n_heads, n_layers, d_ff, dropout
+from config import *
 from transformer.PreTrainingModel import PreTrainingModel
 
 
@@ -105,7 +105,7 @@ class TextGenerator:
         return self.decode_tokens(input_ids[0].tolist())
 
 
-def load_model(model_path: str, device: str):
+def load_model(model_path: str, device: str，vocab_size: int):
     model = PreTrainingModel(
         vocab_size=vocab_size,
         max_seq_len=max_seq_len,
@@ -145,6 +145,7 @@ def main():
     model_path = "gpt_model.pt"   # idk wht the trained model is called assuming it's this
 
     tokenizer = Tokenizer.from_file(tokenizer_path)
+    vocab_size = tokenizer.get_vocab_size()
     model = load_model(model_path, device)
 
     prompts = [
