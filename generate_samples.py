@@ -15,6 +15,9 @@ class TextGenerator:
         self.tokenizer = tokenizer
         self.device = device
         self.model.eval()
+        # Tokenizer special ids (from tokenizer.json)
+        self.eos_token_id = self.tokenizer.token_to_id("</s>")
+        self.pad_token_id = self.tokenizer.token_to_id("<pad>")
 
     def encode_prompt(self, prompt: str) -> torch.Tensor:
         encoding = self.tokenizer.encode(prompt)
@@ -24,7 +27,11 @@ class TextGenerator:
         return torch.tensor([ids], dtype=torch.long, device=self.device)
 
     def decode_tokens(self, token_ids):
-        return self.tokenizer.decode(token_ids)
+        # Remove <s>/<pad>/</s>/... from decoded text if tokenizer supports it.
+        try:
+            return self.tokenizer.decode(token_ids, skip_special_tokens=True)
+        except TypeError:
+            return self.tokenizer.decode(token_ids)
 
     def crop_context(self, input_ids: torch.Tensor) -> torch.Tensor:
         if input_ids.size(1) > max_seq_len:
@@ -41,6 +48,8 @@ class TextGenerator:
                 next_token_logits = logits[:, -1, :]        # [B, V]
                 next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
                 input_ids = torch.cat([input_ids, next_token], dim=1)
+                if self.eos_token_id is not None and int(next_token.item()) == int(self.eos_token_id):
+                    break
 
         return self.decode_tokens(input_ids[0].tolist())
 
@@ -66,6 +75,8 @@ class TextGenerator:
                 next_token = top_k_idx.gather(-1, sampled_idx)
 
                 input_ids = torch.cat([input_ids, next_token], dim=1)
+                if self.eos_token_id is not None and int(next_token.item()) == int(self.eos_token_id):
+                    break
 
         return self.decode_tokens(input_ids[0].tolist())
 
@@ -101,6 +112,8 @@ class TextGenerator:
                 next_token = sorted_indices.gather(-1, sampled_idx)
 
                 input_ids = torch.cat([input_ids, next_token], dim=1)
+                if self.eos_token_id is not None and int(next_token.item()) == int(self.eos_token_id):
+                    break
 
         return self.decode_tokens(input_ids[0].tolist())
 
@@ -141,8 +154,14 @@ def save_results(results, json_path="generated_samples.json", txt_path="generate
 def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    tokenizer_path = os.path.join("tokenizer", "trained_tokenizer", "tokenizer.json")
-    model_path = "gpt_model.pt"   # idk wht the trained model is called assuming it's this
+    script_dir = os.path.dirname(__file__)
+    tokenizer_path = os.path.join(script_dir, "tokenizer", "trained_tokenizer", "tokenizer.json")
+    model_path = os.path.join(script_dir, final_model_path)
+    if not os.path.exists(model_path):
+        # Fallback to the single-file checkpoint saved during training.
+        model_path = os.path.join(script_dir, checkpoint_dir, "checkpoint.pt")
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Cannot find weights: {os.path.join(script_dir, final_model_path)} or {os.path.join(script_dir, checkpoint_dir, 'checkpoint.pt')}")
 
     tokenizer = Tokenizer.from_file(tokenizer_path)
     vocab_size = tokenizer.get_vocab_size()

@@ -1,10 +1,11 @@
 """
 Pre-train decoder-only LM on WikiText-2 (next-token prediction).
-AdamW + warmup + cosine decay; periodic train/val loss, checkpoints, learning curve.
+AdamW + scheduler; periodic train/val loss, single-file checkpoint, learning curve.
 """
 
 from __future__ import annotations
 
+import math
 import os
 from typing import List
 
@@ -14,6 +15,7 @@ import torch.nn.functional as F
 from datasets import load_dataset
 from tokenizers import Tokenizer
 from torch.optim import AdamW
+from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -81,6 +83,23 @@ def plot_learning_curve(
     plt.close()
 
 
+def build_scheduler(optimizer: AdamW, warmup_steps: int, total_steps: int) -> SequentialLR:
+    """Warmup + cosine decay (both measured in optimizer steps)."""
+    total_steps = max(1, int(total_steps))
+    warmup_steps = max(1, int(warmup_steps))
+    warmup_steps = min(warmup_steps, total_steps)
+    cosine_steps = max(1, total_steps - warmup_steps)
+
+    warmup = LinearLR(
+        optimizer,
+        start_factor=1e-8,
+        end_factor=1.0,
+        total_iters=warmup_steps,
+    )
+    cosine = CosineAnnealingLR(optimizer, T_max=cosine_steps, eta_min=0.0)
+    return SequentialLR(optimizer, [warmup, cosine], milestones=[warmup_steps])
+
+
 def main() -> None:
     device = torch.device(cfg.device if torch.cuda.is_available() else "cpu")
 
@@ -119,6 +138,10 @@ def main() -> None:
     steps_per_epoch = steps_per_epoch_raw
     if cfg.max_steps_per_epoch is not None:
         steps_per_epoch = min(steps_per_epoch_raw, cfg.max_steps_per_epoch)
+    print(
+        f"len(train_loader)={len(train_loader)}, "
+        f"steps_per_epoch_raw={steps_per_epoch_raw}, steps_per_epoch={steps_per_epoch}"
+    )
 
     model = PreTrainingModel(
         vocab_size=vocab_size,
@@ -137,6 +160,9 @@ def main() -> None:
         betas=(0.9, 0.95),
     )
 
+    total_steps = max(1, int(cfg.epochs) * int(steps_per_epoch))
+    scheduler = build_scheduler(optimizer, cfg.warmup_steps, total_steps)
+
     global_step = 0
     train_log_steps: List[int] = []
     train_log_losses: List[float] = []
@@ -150,8 +176,8 @@ def main() -> None:
         model.train()
         optimizer.zero_grad(set_to_none=True)
         accum = 0
-        pbar = tqdm(train_loader, desc=f"epoch {epoch+1}/{cfg.epochs}")
-        step_in_epoch = 0
+        pbar = tqdm(train_loader, desc=f"epoch {epoch+1}/{cfg.epochs}", total=steps_per_epoch)
+        optimizer_steps_this_epoch = 0
 
         for x, y in pbar:
             x = x.to(device)
@@ -167,15 +193,21 @@ def main() -> None:
             if accum % cfg.grad_accum_steps == 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
                 optimizer.step()
+                scheduler.step()
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
                 accum = 0
                 ce_value = ce.detach().item()
+                optimizer_steps_this_epoch += 1
+
+                if optimizer_steps_this_epoch >= steps_per_epoch:
+                    break
 
                 if global_step % cfg.log_every == 0:
                     train_log_steps.append(global_step)
                     train_log_losses.append(ce_value)
-                    pbar.set_postfix(loss=f"{ce_value:.4f}")
+                    lr_cur = scheduler.get_last_lr()[0]
+                    pbar.set_postfix(loss=f"{ce_value:.4f}", lr=f"{lr_cur:.2e}")
 
                 if global_step % cfg.eval_every == 0:
                     # Only compute on a subset to avoid long "stalls".
@@ -188,30 +220,29 @@ def main() -> None:
                     )
                     val_log_steps.append(global_step)
                     val_log_losses.append(vloss)
-                    pbar.write(f"[step {global_step}] val loss = {vloss:.4f}")
+                    vppl = math.exp(vloss)
+                    pbar.write(f"[step {global_step}] val loss = {vloss:.4f}, ppl = {vppl:.2f}")
                     # Plotting every time is slow; plot once after training.
-
+ 
                 if global_step % cfg.checkpoint_every == 0:
                     ck_path = os.path.join(out_dir, "checkpoint.pt")
                     save_checkpoint(
                         ck_path,
                         model=model,
                         optimizer=optimizer,
-                        scheduler=None,
+                        scheduler=scheduler,
                         epoch=epoch,
                         global_step=global_step,
                     )
 
-                step_in_epoch += 1
-                if step_in_epoch >= steps_per_epoch:
-                    break
-
         # end of epoch: flush running average if any
-        if accum > 0:
+        if accum > 0 and optimizer_steps_this_epoch < steps_per_epoch:
             torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
             optimizer.step()
+            scheduler.step()
             optimizer.zero_grad(set_to_none=True)
             global_step += 1
+            optimizer_steps_this_epoch += 1
 
     final_path = os.path.join(os.path.dirname(__file__), cfg.final_model_path)
     torch.save(model.state_dict(), final_path)
