@@ -1,14 +1,3 @@
-import json
-import os
-import torch
-import torch.nn.functional as F
-
-from tokenizers import Tokenizer
-
-from config import *
-from transformer.PreTrainingModel import PreTrainingModel
-
-
 class TextGenerator:
     def __init__(self, model, tokenizer, device="cpu"):
         self.model = model.to(device)
