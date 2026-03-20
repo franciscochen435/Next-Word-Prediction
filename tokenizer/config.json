@@ -1,0 +1,5 @@
+{
+    "size": 32000,
+    "special_tokens": ["<s>", "<pad>", "</s>", "<unk>", "<mask>"],
+    "end_of_word": "</w>"
+}
