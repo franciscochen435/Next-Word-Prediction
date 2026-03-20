@@ -1,8 +1,3 @@
-"""
-Pre-train decoder-only LM on WikiText-2 (next-token prediction).
-AdamW + scheduler; periodic train/val loss, single-file checkpoint, learning curve.
-"""
-
 from __future__ import annotations
 
 import math
@@ -255,3 +250,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
