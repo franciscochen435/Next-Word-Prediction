@@ -146,7 +146,7 @@ def main():
 
     tokenizer = Tokenizer.from_file(tokenizer_path)
     vocab_size = tokenizer.get_vocab_size()
-    model = load_model(model_path, device)
+    model = load_model(model_path, device, vocab_size)
 
     prompts = [
         "The future of artificial intelligence",
