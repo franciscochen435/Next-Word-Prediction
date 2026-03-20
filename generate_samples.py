@@ -105,7 +105,7 @@ class TextGenerator:
         return self.decode_tokens(input_ids[0].tolist())
 
 
-def load_model(model_path: str, device: str，vocab_size: int):
+def load_model(model_path: str, device: str, vocab_size: int):
     model = PreTrainingModel(
         vocab_size=vocab_size,
         max_seq_len=max_seq_len,
