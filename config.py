@@ -24,3 +24,4 @@ final_model_path = "gpt_model.pt"
 tokenizer_path = "tokenizer/trained_tokenizer/tokenizer.json"
 grad_clip = 1.0
 num_workers = 0  # dataloader workers (0 is safest on macOS)
+val_max_batches = 50
